@@ -1,0 +1,651 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>老虎棋</title>
+<script src="https://cdn.socket.io/4.8.1/socket.io.min.js"></script>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{font-family:'Segoe UI',sans-serif;background:#1a1a2e;color:#eee;min-height:100vh}
+input,button{font-family:inherit;font-size:1rem}
+.screen{display:none;flex-direction:column;align-items:center;padding:20px;min-height:100vh}
+.screen.active{display:flex}
+#login-screen h1{font-size:3rem;margin-top:20vh;color:#e94560;text-shadow:0 0 20px #e9456066}
+#login-screen p{color:#888;margin:8px 0 24px}
+#login-screen input{padding:12px 20px;border:none;border-radius:8px;background:#16213e;color:#eee;width:240px;text-align:center}
+#login-screen input:focus{outline:2px solid #e94560}
+#login-screen button{margin-top:12px;padding:10px 40px;border:none;border-radius:8px;background:#e94560;color:#fff;cursor:pointer;font-weight:bold}
+#login-screen button:hover{background:#ff6b81}
+#lobby-screen h2{font-size:1.5rem;margin:40px 0 20px}
+.lobby-player{padding:8px 20px;margin:4px 0;background:#16213e;border-radius:6px;width:280px;max-width:90%;text-align:center}
+.lobby-player.me{border:1px solid #e94560}
+#lobby-btn{margin-top:24px;padding:12px 48px;border:none;border-radius:8px;background:#e94560;color:#fff;font-weight:bold;cursor:pointer}
+#lobby-btn:disabled{background:#555;cursor:not-allowed}
+#lobby-status{color:#888;margin-top:12px}
+#top-bar{width:100%;max-width:600px;display:flex;justify-content:space-between;align-items:center;padding:10px 0;border-bottom:1px solid #333;margin-bottom:12px;flex-wrap:wrap;gap:4px}
+#turn-info{font-size:0.9rem}
+#turn-info .highlight{color:#4caf50;font-weight:bold}
+#turn-info .wait{color:#ff9800}
+#board-wrapper{display:flex;gap:20px;flex-wrap:wrap;justify-content:center}
+#board{display:grid;grid-template-columns:repeat(10,44px);gap:2px;background:#333;padding:2px;border-radius:6px}
+.cell{width:44px;height:44px;border-radius:3px;display:flex;align-items:center;justify-content:center;font-size:10px;cursor:pointer;position:relative;transition:0.15s;color:#666;-webkit-tap-highlight-color:transparent;user-select:none}
+.cell:hover{transform:scale(1.08);z-index:2}
+.cell.void{background:#0f3460}
+.cell.grass{background:#2d5a27}
+.cell.empty{background:#c4a882}
+.cell.initial-highlight{box-shadow:inset 0 0 0 2px rgba(255,255,100,0.3)}
+.cell.selected{box-shadow:0 0 0 3px #e94560;z-index:3;transform:scale(1.1)}
+.cell .coord{position:absolute;bottom:1px;right:2px;font-size:7px;opacity:0.5}
+.cell .tiger{font-size:22px;line-height:1;text-shadow:0 0 6px rgba(255,200,0,0.5)}
+
+/* ===== 响应式：手机 ===== */
+@media (max-width:768px){
+  .screen{padding:10px}
+  #board{gap:1px;padding:1px;width:100%}
+  .cell{width:calc((100vw - 22px)/10);height:calc((100vw - 22px)/10);min-width:0;font-size:7px}
+  .cell .tiger{font-size:calc((100vw - 22px)/10*0.55)}
+  .cell .coord{font-size:5px;bottom:0;right:1px}
+  .cell:hover{transform:none}
+  #board-wrapper{gap:10px}
+  #side-panel{min-width:unset;width:100%;max-width:100%}
+  #op-grid{justify-content:center}
+  #top-bar{flex-direction:column;text-align:center;font-size:0.85rem}
+  #login-screen h1{font-size:2rem;margin-top:15vh}
+  #login-screen input{width:200px;font-size:0.9rem}
+  .lobby-player{padding:6px 16px;width:80%;max-width:280px}
+  #event-log{max-height:120px;font-size:0.75rem}
+  .op-btn{width:48px;height:48px}
+  #action-form{padding:10px}
+  #action-form input[type=number]{width:52px}
+}
+#side-panel{display:flex;flex-direction:column;gap:8px;min-width:220px}
+#op-grid{display:grid;grid-template-columns:repeat(4,52px);gap:6px}
+.op-btn{width:52px;height:52px;border-radius:50%;border:2px solid #444;background:#16213e;color:#eee;cursor:pointer;position:relative;overflow:hidden;display:flex;align-items:center;justify-content:center;flex-direction:column;transition:0.2s;padding:0;font-size:0}
+.op-btn .op-icon{font-size:16px;font-weight:bold;position:relative;z-index:1}
+.op-btn .op-label{font-size:8px;position:relative;z-index:1;margin-top:1px}
+.op-btn .cd-num{font-size:9px;color:#ff9800;position:relative;z-index:1;margin-top:1px}
+.op-btn .cd-arc{position:absolute;inset:0;border-radius:50%;pointer-events:none}
+.op-btn:hover{border-color:#e94560;transform:scale(1.08)}
+.op-btn.active{border-color:#4caf50;background:#1b5e20}
+.op-btn:disabled{opacity:0.4;cursor:not-allowed}
+#action-form{background:#16213e;border-radius:8px;padding:12px;margin-top:6px;display:none;flex-direction:column;gap:8px}
+#action-form.visible{display:flex}
+#action-form label{font-size:0.85rem;color:#aaa}
+#action-form input[type=number]{width:60px;padding:4px 8px;border:none;border-radius:4px;background:#0f3460;color:#eee;text-align:center}
+#action-form input[type=number]:focus{outline:2px solid #e94560}
+.form-row{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+#tiger-select{padding:4px 8px;border:none;border-radius:4px;background:#0f3460;color:#eee}
+.dir-btns{display:flex;gap:4px;flex-wrap:wrap}
+.dir-btn{width:36px;height:36px;border-radius:50%;border:1px solid #555;background:#0f3460;color:#eee;cursor:pointer;font-size:16px;display:flex;align-items:center;justify-content:center}
+.dir-btn:hover{background:#1a5276;border-color:#e94560}
+.dir-btn.active{background:#e94560;border-color:#e94560}
+#execute-btn{padding:8px 24px;border:none;border-radius:6px;background:#4caf50;color:#fff;font-weight:bold;cursor:pointer;display:none}
+#execute-btn:hover{background:#66bb6a}
+.form-check{display:flex;align-items:center;gap:6px;font-size:0.85rem;color:#aaa}
+#event-log{margin-top:12px;width:100%;max-width:600px;max-height:150px;overflow-y:auto;background:#0d1b2a;border-radius:6px;padding:8px 12px;font-size:0.8rem;line-height:1.6}
+#event-log .ev{color:#aaa}
+#event-log .ev-private{color:#4fc3f7}
+#event-log .ev-death{color:#e94560}
+#event-log .ev-win{color:#ffd700;font-weight:bold}
+#rules-screen{max-width:520px;margin:0 auto;text-align:left;gap:0}
+#rules-screen h2{font-size:1.3rem;color:#e94560;margin:16px 0 8px;text-align:center}
+#rules-screen p{font-size:0.85rem;line-height:1.7;color:#bbb;margin:0}
+#rules-screen .section{margin:6px 0;padding:8px 14px;background:#16213e;border-radius:6px}
+#rules-screen .section h3{font-size:0.9rem;color:#4caf50;margin-bottom:4px}
+#rules-screen .section .row{display:flex;justify-content:space-between;font-size:0.82rem;color:#aaa;padding:2px 0;border-bottom:1px solid #ffffff0a}
+#rules-screen .section .row:last-child{border:none}
+#rules-screen .section .row .cd{color:#ff9800;font-size:0.75rem}
+#rules-screen .btn-row{text-align:center;margin-top:16px}
+#rules-screen .btn-row button{padding:10px 48px;border:none;border-radius:8px;background:#e94560;color:#fff;font-weight:bold;cursor:pointer;font-size:1rem}
+#rules-screen .btn-row button:hover{background:#ff6b81}
+@media(max-width:768px){#rules-screen{padding:10px 6px}#rules-screen .section{padding:6px 10px}}
+#toast{position:fixed;top:20px;left:50%;transform:translateX(-50%);background:#e94560;color:#fff;padding:10px 24px;border-radius:8px;z-index:100;display:none;font-weight:bold;box-shadow:0 4px 20px rgba(0,0,0,0.5)}
+</style>
+</head>
+<body>
+
+<div id="toast"></div>
+
+<!-- =============== 登录 =============== -->
+<div id="login-screen" class="screen active">
+  <h1>&#x1F405; 老虎棋</h1>
+  <p>局域网对战 · 暗棋博弈</p>
+  <input id="nick-input" placeholder="输入昵称" maxlength="8" autofocus>
+  <button onclick="joinLobby()">加入</button>
+</div>
+
+<!-- =============== 规则 =============== -->
+<div id="rules-screen" class="screen">
+  <h2>&#x1F405; 老虎棋 · 规则</h2>
+  <div class="section">
+    <h3>&#x1F4DD; 概述</h3>
+    <p>10&times;10 棋盘，双方各控制 5 只老虎（场上最多 3 只）。<br>先手 (P1) 和后手 (P2) 轮流操作，每回合 1 次行动。<br>将对方老虎全部消灭即获胜。</p>
+  </div>
+  <div class="section">
+    <h3>&#x1F6A7; 放置阶段</h3>
+    <p>开局双方各在中央区域 (2,2)-(5,5) 选一个格子放 1 只老虎。</p>
+  </div>
+  <div class="section">
+    <h3>&#x2694;&#xFE0F; 操作列表</h3>
+    <div class="row"><span>移动</span><span class="cd">冷却 0</span><span>老虎上下左右走一格</span></div>
+    <div class="row"><span>放置</span><span class="cd">冷却 3</span><span>从后备区放老虎上场</span></div>
+    <div class="row"><span>土地</span><span class="cd">冷却 1</span><span>虚空 &rarr; 草地</span></div>
+    <div class="row"><span>攻击</span><span class="cd">冷却 3</span><span>目标格变虚空，命中老虎则击杀</span></div>
+    <div class="row"><span>割草</span><span class="cd">冷却 2</span><span>草地 &rarr; 空地（敌方老虎减 1 行动）</span></div>
+    <div class="row"><span>耳朵</span><span class="cd">冷却 3</span><span>探测指定格是否有老虎</span></div>
+    <div class="row"><span>草籽</span><span class="cd">冷却 3</span><span>空地 &rarr; 草地</span></div>
+  </div>
+  <div class="section">
+    <h3>&#x1F575;&#xFE0F; 隐匿</h3>
+    <p>移动/放置/攻击可消耗隐匿（冷却 3），对方看不到你的位置信息。</p>
+  </div>
+  <div class="section">
+    <h3>&#x1F52A; 告密（随时可用）</h3>
+    <p>暴露自己一只老虎的坐标进行告密。<br>若该格同时有对方老虎（重叠），对方老虎死亡。<br>重叠时先告密者胜，可打破僵局。</p>
+  </div>
+  <div class="section">
+    <h3>&#x26A0;&#xFE0F; 空地死亡</h3>
+    <p>老虎在空地上停留连续 2 个自己回合则死亡。</p>
+  </div>
+  <div class="btn-row">
+    <button onclick="proceedToLobby()">&#x1F3E0; 进入大厅</button>
+  </div>
+</div>
+
+<!-- =============== 大厅 =============== -->
+<div id="lobby-screen" class="screen">
+  <h2>&#x1F3E0; 大厅</h2>
+  <div id="lobby-players"></div>
+  <div id="lobby-status">等待其他玩家...</div>
+  <button id="lobby-btn" onclick="startGame()" disabled>开始游戏</button>
+</div>
+
+<!-- =============== 游戏 =============== -->
+<div id="game-screen" class="screen">
+  <div id="top-bar">
+    <div id="turn-info">等待...</div>
+    <div id="player-info"></div>
+  </div>
+  <div id="board-wrapper">
+    <div id="board"></div>
+    <div id="side-panel">
+      <div id="op-grid"></div>
+      <div id="snitch-section" style="margin:4px 0;text-align:center">
+        <button id="snitch-btn" onclick="toggleSnitch()" style="padding:6px 20px;border:none;border-radius:6px;background:#ff9800;color:#fff;font-weight:bold;cursor:pointer;font-size:0.85rem">&#x1F52A; 告密</button>
+        <div id="snitch-form" style="display:none;margin-top:6px;background:#16213e;border-radius:8px;padding:10px;flex-direction:column;gap:8px">
+          <div class="form-row">
+            <label style="font-size:0.85rem;color:#aaa">暴露老虎:</label>
+            <select id="snitch-tiger-select" style="padding:4px 8px;border:none;border-radius:4px;background:#0f3460;color:#eee"></select>
+          </div>
+          <div class="form-row" style="justify-content:center">
+            <button onclick="executeSnitch()" style="padding:6px 24px;border:none;border-radius:6px;background:#e94560;color:#fff;font-weight:bold;cursor:pointer">确认告密</button>
+          </div>
+        </div>
+      </div>
+      <div id="action-form">
+        <div class="form-row" id="tiger-row" style="display:none">
+          <label>老虎:</label>
+          <select id="tiger-select"></select>
+        </div>
+        <div class="form-row" id="dir-row" style="display:none">
+          <label>方向:</label>
+          <div class="dir-btns">
+            <button class="dir-btn" data-dir="up">&#x2191;</button>
+            <button class="dir-btn" data-dir="left">&#x2190;</button>
+            <button class="dir-btn" data-dir="down">&#x2193;</button>
+            <button class="dir-btn" data-dir="right">&#x2192;</button>
+          </div>
+        </div>
+        <div class="form-row" id="coord-row" style="display:none">
+          <label>坐标:</label>
+          <input type="number" id="cx" min="1" max="10" placeholder="X (1-10)">
+          <input type="number" id="cy" min="1" max="10" placeholder="Y (1-10)">
+        </div>
+        <div class="form-row" id="stealth-row" style="display:none">
+          <label class="form-check">
+            <input type="checkbox" id="stealth-cb"> 隐匿 (CD: <span id="stealth-cd-display">0</span>)
+          </label>
+        </div>
+        <button id="execute-btn" onclick="executeAction()">执行</button>
+      </div>
+      <div id="err-display" style="color:#e94560;font-size:0.8rem;min-height:20px"></div>
+    </div>
+  </div>
+  <div id="event-log"></div>
+</div>
+
+<script>
+// ===== 常量 =====
+var CD_TOTAL = { move:0, place:3, land:1, attack:3, mow:2, ear:3, seed:3, stealth:3 };
+var OP_ICON  = { move:'M', place:'P', land:'L', attack:'A', mow:'C', ear:'E', seed:'S', stealth:'H' };
+var OP_LABEL = { move:'移动', place:'放置', land:'土地', attack:'攻击', mow:'割草', ear:'耳朵', seed:'草籽', stealth:'隐匿' };
+var BOARD_SIZE = 10;
+
+// ===== 状态 =====
+var socket = null;
+var appState = { screen:'login', nickname:'', pid:'', gameId:'', opponent:'' };
+var game = { phase:'', round:0, isMyTurn:false, board:[], myTigers:[], myTotalLeft:5, myCooldowns:{}, myActions:1, events:[], winner:null };
+var selectedOp = null, selectedDir = null, selectedCell = null;
+
+// ===== Socket =====
+function connectSocket() {
+  socket = io();
+  socket.on('connect', function(){
+    if (appState.pendingRules) { appState.pendingRules = false; showScreen('rules'); }
+  });
+  socket.on('joined', function(d){ appState.pid = d.id; showScreen('lobby'); });
+  socket.on('lobby_update', onLobbyUpdate);
+  socket.on('game_start', onGameStart);
+  socket.on('game_update', onGameUpdate);
+  socket.on('game_over', onGameOver);
+  socket.on('opponent_left', function(d){ showToast('对手 ' + d.nick + ' 离开了'); showScreen('login'); });
+  socket.on('error', function(d){ showErr(d.msg); });
+}
+
+// ===== 界面切换 =====
+function showScreen(name) {
+  var all = document.querySelectorAll('.screen');
+  for (var i = 0; i < all.length; i++) all[i].classList.remove('active');
+  if (name === 'login') document.getElementById('login-screen').classList.add('active');
+  if (name === 'rules') document.getElementById('rules-screen').classList.add('active');
+  if (name === 'lobby') document.getElementById('lobby-screen').classList.add('active');
+  if (name === 'game')  document.getElementById('game-screen').classList.add('active');
+  appState.screen = name;
+}
+
+function joinLobby() {
+  var nick = document.getElementById('nick-input').value.trim();
+  if (!nick) { showToast('请输入昵称'); return; }
+  appState.nickname = nick;
+  if (socket && socket.connected) {
+    showScreen('rules');
+  } else {
+    if (!socket) connectSocket();
+    showToast('连接中...');
+    appState.pendingRules = true;
+  }
+}
+
+function proceedToLobby() {
+  if (socket && socket.connected) {
+    socket.emit('join', { nickname: appState.nickname });
+  } else {
+    showToast('连接未就绪，请稍后');
+  }
+}
+
+function onLobbyUpdate(d) {
+  var el = document.getElementById('lobby-players');
+  el.innerHTML = '';
+  for (var i = 0; i < d.players.length; i++) {
+    var p = d.players[i];
+    var div = document.createElement('div');
+    div.className = 'lobby-player' + (p.id === appState.pid ? ' me' : '');
+    div.textContent = p.nickname + (p.id === appState.pid ? ' (你)' : '');
+    el.appendChild(div);
+  }
+  var btn = document.getElementById('lobby-btn');
+  var status = document.getElementById('lobby-status');
+  if (d.players.length >= 2) {
+    btn.disabled = false; btn.textContent = '开始游戏';
+    status.innerHTML = '';
+  } else {
+    btn.disabled = true; btn.textContent = '开始游戏';
+    status.innerHTML = '等待其他玩家加入...';
+  }
+}
+
+function startGame() { socket.emit('start_game'); }
+
+// ===== Game Start =====
+function onGameStart(d) {
+  appState.gameId = d.game_id;
+  appState.pid = d.your_pid;
+  appState.opponent = d.opponent;
+  game = { phase:'placement', round:1, isMyTurn:false, board:[], myTigers:[], myTotalLeft:5, myCooldowns:{}, myActions:1, events:[], winner:null };
+  selectedOp = null; selectedDir = null; selectedCell = null;
+  showScreen('game');
+  initBoard();
+  initOpButtons();
+  document.getElementById('event-log').innerHTML = '<div class="ev">游戏开始！</div>';
+}
+
+// ===== Board =====
+function initBoard() {
+  var board = document.getElementById('board');
+  board.innerHTML = '';
+  for (var y = 0; y < BOARD_SIZE; y++) {
+    for (var x = 0; x < BOARD_SIZE; x++) {
+      var div = document.createElement('div');
+      div.className = 'cell void';
+      div.dataset.x = x; div.dataset.y = y;
+      div.innerHTML = '<span class="coord">' + (x+1) + ',' + (y+1) + '</span>';
+      if (x >= 1 && x <= 4 && y >= 1 && y <= 4) div.classList.add('initial-highlight');
+      div.addEventListener('click', makeClickHandler(x, y));
+      board.appendChild(div);
+    }
+  }
+}
+
+function makeClickHandler(x, y) {
+  return function() { onCellClick(x, y); };
+}
+
+function renderBoard() {
+  var cells = document.querySelectorAll('#board .cell');
+  var idx = 0;
+  for (var y = 0; y < BOARD_SIZE; y++) {
+    for (var x = 0; x < BOARD_SIZE; x++) {
+      var cell = cells[idx++];
+      var type = (game.board[y] && game.board[y][x]) || 'void';
+      // 只更新 class，不重建 innerHTML（coord span 保留不动）
+      cell.className = 'cell ' + type;
+      if (x >= 1 && x <= 4 && y >= 1 && y <= 4) cell.classList.add('initial-highlight');
+      if (selectedCell && selectedCell[0] === x && selectedCell[1] === y) {
+        cell.classList.add('selected');
+      }
+      // 老虎标记：有则添加 span，无则移除
+      var hasTiger = false;
+      for (var ti = 0; ti < game.myTigers.length; ti++) {
+        if (game.myTigers[ti].x === x && game.myTigers[ti].y === y) { hasTiger = true; break; }
+      }
+      var tigerSpan = cell.querySelector('.tiger');
+      if (hasTiger && !tigerSpan) {
+        var ts = document.createElement('span');
+        ts.className = 'tiger';
+        ts.innerHTML = '&#x1F42F;';
+        cell.appendChild(ts);
+      } else if (!hasTiger && tigerSpan) {
+        tigerSpan.remove();
+      }
+    }
+  }
+}
+
+function onCellClick(x, y) {
+  if (game.phase === 'placement') {
+    if (!game.isMyTurn) { showToast('不是你的回合'); return; }
+    if (x < 1 || x > 4 || y < 1 || y > 4) { showToast('请在初始区域 (2,2)-(5,5) 内放置'); return; }
+    socket.emit('action', { game_id: appState.gameId, action: { x: x, y: y } });
+    return;
+  }
+  selectedCell = [x, y];
+  document.getElementById('cx').value = x + 1;
+  document.getElementById('cy').value = y + 1;
+  renderBoard();
+}
+
+// ===== Op Buttons (fan-shaped CD) — 一次创建，后续只更新 =====
+function initOpButtons() {
+  var grid = document.getElementById('op-grid');
+  var ops = ['move','place','land','attack','mow','ear','seed'];
+  for (var oi = 0; oi < ops.length; oi++) {
+    var op = ops[oi];
+    var btn = document.createElement('button');
+    btn.className = 'op-btn';
+    btn.dataset.op = op;
+    btn.innerHTML = '<span class="op-icon">' + OP_ICON[op] + '</span>'
+      + '<span class="op-label">' + OP_LABEL[op] + '</span>'
+      + '<span class="cd-num"></span>'
+      + '<div class="cd-arc"></div>';
+    btn.addEventListener('click', makeOpHandler(op));
+    grid.appendChild(btn);
+  }
+}
+
+function updateOpButtons() {
+  var btns = document.querySelectorAll('.op-btn');
+  for (var i = 0; i < btns.length; i++) {
+    var btn = btns[i];
+    var op = btn.dataset.op;
+    var cd = game.myCooldowns[op] || 0;
+    var total = CD_TOTAL[op] || 0;
+    var angle = total > 0 ? (cd / total) * 360 : 0;
+    btn.querySelector('.cd-num').textContent = cd > 0 ? cd : '';
+    btn.querySelector('.cd-arc').style.background = 'conic-gradient(rgba(80,80,80,0.7) 0deg ' + angle + 'deg, transparent ' + angle + 'deg 360deg)';
+  }
+}
+
+function makeOpHandler(op) {
+  return function() { selectOp(op); };
+}
+
+function selectOp(op) {
+  if (!game.isMyTurn) { showToast('不是你的回合'); return; }
+  selectedOp = op;
+  selectedDir = null;
+  var all = document.querySelectorAll('.op-btn');
+  for (var i = 0; i < all.length; i++) all[i].classList.remove('active');
+  var target = document.querySelector('.op-btn[data-op="' + op + '"]');
+  if (target) target.classList.add('active');
+  updateActionForm();
+}
+
+function updateActionForm() {
+  var form = document.getElementById('action-form');
+  var tigerRow = document.getElementById('tiger-row');
+  var dirRow = document.getElementById('dir-row');
+  var coordRow = document.getElementById('coord-row');
+  var stealthRow = document.getElementById('stealth-row');
+  var execBtn = document.getElementById('execute-btn');
+
+  tigerRow.style.display = 'none';
+  dirRow.style.display = 'none';
+  coordRow.style.display = 'none';
+  stealthRow.style.display = 'none';
+  execBtn.style.display = 'none';
+  form.classList.remove('visible');
+
+  if (!selectedOp) return;
+  form.classList.add('visible');
+
+  var needsTiger = (selectedOp === 'move' || selectedOp === 'attack');
+  var needsDir = (selectedOp === 'move' || selectedOp === 'attack');
+  var needsCoord = (selectedOp === 'place' || selectedOp === 'land' || selectedOp === 'mow' || selectedOp === 'ear' || selectedOp === 'seed');
+  var canStealth = (selectedOp === 'move' || selectedOp === 'place' || selectedOp === 'attack');
+
+  if (needsTiger) {
+    tigerRow.style.display = 'flex';
+    var sel = document.getElementById('tiger-select');
+    sel.innerHTML = '';
+    for (var i = 0; i < game.myTigers.length; i++) {
+      var t = game.myTigers[i];
+      var opt = document.createElement('option');
+      opt.value = t.id;
+      opt.textContent = '老虎 (' + (t.x+1) + ',' + (t.y+1) + ')';
+      sel.appendChild(opt);
+    }
+    if (game.myTigers.length === 0) { showToast('场上无老虎'); return; }
+  }
+  if (needsDir) {
+    dirRow.style.display = 'flex';
+    var dirBtns = document.querySelectorAll('.dir-btn');
+    for (var d = 0; d < dirBtns.length; d++) dirBtns[d].classList.remove('active');
+  }
+  if (needsCoord) {
+    coordRow.style.display = 'flex';
+    if (selectedCell) {
+      document.getElementById('cx').value = selectedCell[0] + 1;
+      document.getElementById('cy').value = selectedCell[1] + 1;
+    }
+  }
+  if (canStealth) {
+    stealthRow.style.display = 'flex';
+    document.getElementById('stealth-cd-display').textContent = game.myCooldowns.stealth || 0;
+    document.getElementById('stealth-cb').disabled = (game.myCooldowns.stealth || 0) > 0;
+  }
+  execBtn.style.display = 'inline-block';
+}
+
+// Dir buttons
+document.addEventListener('click', function(e) {
+  var btn = e.target.closest('.dir-btn');
+  if (!btn) return;
+  var all = document.querySelectorAll('.dir-btn');
+  for (var i = 0; i < all.length; i++) all[i].classList.remove('active');
+  btn.classList.add('active');
+  selectedDir = btn.dataset.dir;
+});
+
+// ===== Execute =====
+// ===== Snitch =====
+function toggleSnitch() {
+  var form = document.getElementById('snitch-form');
+  if (form.style.display === 'flex') { form.style.display = 'none'; return; }
+  var sel = document.getElementById('snitch-tiger-select');
+  sel.innerHTML = '';
+  for (var i = 0; i < game.myTigers.length; i++) {
+    var t = game.myTigers[i];
+    var opt = document.createElement('option');
+    opt.value = t.x + ',' + t.y;
+    opt.textContent = '老虎 (' + (t.x+1) + ',' + (t.y+1) + ')';
+    sel.appendChild(opt);
+  }
+  if (game.myTigers.length === 0) { showToast('场上无老虎'); return; }
+  form.style.display = 'flex';
+}
+function executeSnitch() {
+  var sel = document.getElementById('snitch-tiger-select');
+  var parts = sel.value.split(',');
+  var x = parseInt(parts[0]), y = parseInt(parts[1]);
+  socket.emit('snitch', { game_id: appState.gameId, x: x, y: y });
+  document.getElementById('snitch-form').style.display = 'none';
+}
+
+function executeAction() {
+  if (!game.isMyTurn) { showToast('不是你的回合'); return; }
+  if (!selectedOp) { showToast('请选择操作'); return; }
+
+  var action = { type: selectedOp };
+  var needsTiger = (selectedOp === 'move' || selectedOp === 'attack');
+  var needsDir = (selectedOp === 'move' || selectedOp === 'attack');
+  var needsCoord = (selectedOp === 'place' || selectedOp === 'land' || selectedOp === 'mow' || selectedOp === 'ear' || selectedOp === 'seed');
+  var canStealth = (selectedOp === 'move' || selectedOp === 'place' || selectedOp === 'attack');
+
+  if (needsTiger) {
+    var sel = document.getElementById('tiger-select');
+    action.tiger_id = sel.value;
+    if (!action.tiger_id) { showToast('请选择老虎'); return; }
+  }
+  if (needsDir) {
+    if (!selectedDir) { showToast('请选择方向'); return; }
+    action.direction = selectedDir;
+  }
+  if (needsCoord) {
+    var x = parseInt(document.getElementById('cx').value);
+    var y = parseInt(document.getElementById('cy').value);
+    if (isNaN(x) || isNaN(y) || x < 1 || x > 10 || y < 1 || y > 10) { showToast('请输入有效坐标 (1-10)'); return; }
+    action.x = x - 1; action.y = y - 1;
+  }
+  if (canStealth) {
+    action.use_stealth = document.getElementById('stealth-cb').checked;
+  }
+
+  socket.emit('action', { game_id: appState.gameId, action: action });
+  selectedOp = null;
+  selectedDir = null;
+  var all = document.querySelectorAll('.op-btn');
+  for (var i = 0; i < all.length; i++) all[i].classList.remove('active');
+  document.getElementById('action-form').classList.remove('visible');
+  document.getElementById('execute-btn').style.display = 'none';
+}
+
+// ===== Game Update =====
+function onGameUpdate(d) {
+  game.phase = d.phase;
+  game.round = d.round;
+  game.isMyTurn = d.is_my_turn;
+  game.board = d.board;
+  game.myTigers = d.my_tigers || [];
+  game.myTotalLeft = d.my_total_left;
+  game.myCooldowns = d.my_cooldowns || {};
+  game.myActions = d.my_actions;
+
+  renderBoard();
+  updateTopBar();
+  updateOpButtons();
+  renderEvents(d.events || []);
+  clearErr();
+
+  if (d.phase === 'placement') {
+    document.getElementById('action-form').classList.remove('visible');
+  }
+}
+
+function updateTopBar() {
+  var turnEl = document.getElementById('turn-info');
+  var playerEl = document.getElementById('player-info');
+  var phaseLabel = game.phase === 'placement' ? '放置阶段' : '第 ' + game.round + ' 回合';
+  var turnLabel = game.isMyTurn ? '<span class="highlight">你的回合</span>' : '<span class="wait">等待对手...</span>';
+  turnEl.innerHTML = phaseLabel + ' &middot; ' + turnLabel;
+  playerEl.textContent = appState.nickname + ' vs ' + appState.opponent;
+}
+
+function renderEvents(events) {
+  var log = document.getElementById('event-log');
+  for (var ei = 0; ei < events.length; ei++) {
+    var e = events[ei];
+    var div = document.createElement('div');
+    div.className = 'ev';
+    var text = '';
+    switch (e.type) {
+      case 'placement': text = '你在 (' + (e.x+1) + ',' + (e.y+1) + ') 放置了老虎'; break;
+      case 'move': text = e.stealthed ? '匿踪移动' : '老虎从 (' + (e.from_x+1) + ',' + (e.from_y+1) + ') 移走'; break;
+      case 'place': text = e.stealthed ? '匿踪放置' : '老虎放置在 (' + (e.x+1) + ',' + (e.y+1) + ')'; break;
+      case 'land': text = '土地: (' + (e.x+1) + ',' + (e.y+1) + ') 变为草地'; break;
+      case 'attack':
+        if (e.stealthed) { text = '匿踪攻击'; }
+        else { text = '攻击 (' + (e.target_x+1) + ',' + (e.target_y+1) + ') 变为虚空'; }
+        break;
+      case 'mow': text = '割草: (' + (e.x+1) + ',' + (e.y+1) + ') 变为空地'; break;
+      case 'ear_result': text = '探测 (' + (e.x+1) + ',' + (e.y+1) + '): ' + (e.has_tiger ? '有老虎' : '无老虎'); div.className = 'ev ev-private'; break;
+      case 'seed': text = '草籽: (' + (e.x+1) + ',' + (e.y+1) + ') 变为草地'; break;
+      case 'tiger_died': text = '老虎在 (' + (e.x+1) + ',' + (e.y+1) + ') 死亡'; div.className = 'ev ev-death'; break;
+      case 'game_over': text = '游戏结束！胜者: ' + e.winner; div.className = 'ev ev-win'; break;
+      case 'snitch_result': text = '告密 (' + (e.x+1) + ',' + (e.y+1) + '): ' + (e.success ? '命中！对方老虎死亡' : '该格无对方老虎'); break;
+      default: text = JSON.stringify(e);
+    }
+    div.textContent = text;
+    log.appendChild(div);
+    log.scrollTop = log.scrollHeight;
+  }
+}
+
+// ===== Game Over =====
+function onGameOver(d) {
+  game.winner = d.winner;
+  var isWin = (d.winner === appState.pid);
+  showToast(isWin ? '你赢了！' : '你输了');
+}
+
+// ===== Helpers =====
+function showToast(msg) {
+  var el = document.getElementById('toast');
+  el.textContent = msg; el.style.display = 'block';
+  setTimeout(function(){ el.style.display = 'none'; }, 2500);
+}
+
+function showErr(msg) {
+  document.getElementById('err-display').textContent = msg;
+  setTimeout(function(){ document.getElementById('err-display').textContent = ''; }, 4000);
+}
+
+function clearErr() { document.getElementById('err-display').textContent = ''; }
+
+// Enter key
+document.addEventListener('keydown', function(e) {
+  if (e.key === 'Enter') {
+    if (appState.screen === 'login') joinLobby();
+    else if (appState.screen === 'rules') proceedToLobby();
+    else if (appState.screen === 'game') {
+      var btn = document.getElementById('execute-btn');
+      if (btn.style.display !== 'none') executeAction();
+    }
+  }
+});
+
+connectSocket();
+</script>
+</body>
+</html>
