@@ -173,9 +173,9 @@ def _send_game_update(gid):
 
 # ===================== 启动 =====================
 if __name__ == '__main__':
+    port = int(os.environ.get("PORT", 5000))
     print("=" * 50)
     print("  老虎棋 服务器启动")
-    print("  本机地址: http://localhost:5000")
-    print("  局域网地址: http://<本机IP>:5000")
+    print(f"  地址: http://0.0.0.0:{port}")
     print("=" * 50)
-    socketio.run(app, host='0.0.0.0', port=5000, allow_unsafe_werkzeug=True)
+    socketio.run(app, host='0.0.0.0', port=port, allow_unsafe_werkzeug=True)
